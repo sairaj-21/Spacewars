@@ -2,6 +2,8 @@ import pygame
 import random
 import os
 import math
+import sqlite3
+import array
 
 # Initialize Pygame
 pygame.init()
@@ -11,17 +13,254 @@ WIDTH, HEIGHT = 800, 600
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GRAY = (100, 100, 100)
+DARK_GRAY = (40, 40, 45)
+LIGHT_GRAY = (180, 180, 180)
 RED = (255, 50, 50)
 YELLOW = (255, 255, 0)
 CYAN = (0, 255, 255)
-GREEN = (0, 255, 0)
-PURPLE = (150, 0, 255)
+GREEN = (50, 255, 50)
+PURPLE = (180, 50, 255)
+ORANGE = (255, 150, 0)
+GOLD = (255, 215, 0)
+SILVER = (200, 200, 220)
+BRONZE = (205, 127, 50)
 FPS = 60
 
 # Screen setup
 window = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption('Space Wars')
 clock = pygame.time.Clock()
+
+# ----------------------------------------------------
+# 1. OPTIMIZED FONT CACHE
+# ----------------------------------------------------
+_FONT_CACHE = {}
+
+def get_font(size, bold=False):
+    key = (size, bold)
+    if key not in _FONT_CACHE:
+        try:
+            _FONT_CACHE[key] = pygame.font.SysFont("arial" if pygame.font.match_font("arial") else None, size, bold=bold)
+        except Exception:
+            _FONT_CACHE[key] = pygame.font.SysFont(None, size, bold=bold)
+    return _FONT_CACHE[key]
+
+def display_text(text, size, color, x, y, surface=window, bold=False, align="center"):
+    font = get_font(size, bold=bold)
+    rendered_text = font.render(str(text), True, color)
+    if align == "center":
+        text_rect = rendered_text.get_rect(center=(int(x), int(y)))
+    elif align == "left":
+        text_rect = rendered_text.get_rect(midleft=(int(x), int(y)))
+    elif align == "right":
+        text_rect = rendered_text.get_rect(midright=(int(x), int(y)))
+    else:
+        text_rect = rendered_text.get_rect(center=(int(x), int(y)))
+    surface.blit(rendered_text, text_rect)
+
+# ----------------------------------------------------
+# 2. PROCEDURAL RETRO AUDIO ENGINE (ZERO EXTERNAL FILES)
+# ----------------------------------------------------
+class SoundManager:
+    def __init__(self):
+        self.sounds = {}
+        self.enabled = False
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+            self.enabled = True
+            self._generate_sounds()
+        except Exception as e:
+            print(f"Audio notice: {e}. Running in silent mode.")
+            self.enabled = False
+
+    def _generate_sounds(self):
+        try:
+            self.sounds['laser'] = self._make_laser()
+            self.sounds['explosion'] = self._make_noise(duration=0.22, decay=6.0, volume=0.45)
+            self.sounds['bomb'] = self._make_bomb()
+            self.sounds['powerup'] = self._make_arpeggio([523, 659, 784, 1046], duration=0.22)
+            self.sounds['hurt'] = self._make_hurt()
+            self.sounds['alarm'] = self._make_alarm()
+        except Exception as e:
+            print(f"Sound generation warning: {e}")
+            self.enabled = False
+
+    def _make_laser(self):
+        sample_rate = 22050
+        duration = 0.11
+        n_samples = int(sample_rate * duration)
+        buf = array.array('h')
+        phase = 0.0
+        for i in range(n_samples):
+            t = i / n_samples
+            freq = 950.0 * (1.0 - t) + 260.0 * t
+            phase += 2.0 * math.pi * freq / sample_rate
+            env = 1.0 - t
+            val = int(14000 * math.sin(phase) * env)
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def _make_noise(self, duration=0.22, decay=6.0, volume=0.45):
+        sample_rate = 22050
+        n_samples = int(sample_rate * duration)
+        buf = array.array('h')
+        for i in range(n_samples):
+            t = i / n_samples
+            env = math.exp(-decay * t)
+            noise = (random.random() * 2.0 - 1.0)
+            val = int(32767 * volume * noise * env)
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def _make_bomb(self):
+        sample_rate = 22050
+        duration = 0.55
+        n_samples = int(sample_rate * duration)
+        buf = array.array('h')
+        phase = 0.0
+        for i in range(n_samples):
+            t = i / n_samples
+            freq = 75.0 * (1.0 - t * 0.5)
+            phase += 2.0 * math.pi * freq / sample_rate
+            env = math.exp(-3.5 * t)
+            noise = (random.random() * 2.0 - 1.0) * 0.35
+            wave = (math.sin(phase) * 0.65 + noise)
+            val = int(25000 * wave * env)
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def _make_arpeggio(self, freqs, duration=0.22):
+        sample_rate = 22050
+        n_samples = int(sample_rate * duration)
+        step = max(1, n_samples // len(freqs))
+        buf = array.array('h')
+        phase = 0.0
+        for i in range(n_samples):
+            note_idx = min(i // step, len(freqs) - 1)
+            freq = freqs[note_idx]
+            phase += 2.0 * math.pi * freq / sample_rate
+            note_pos = (i % step) / step
+            env = (1.0 - note_pos * 0.25)
+            val = int(14000 * math.sin(phase) * env)
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def _make_hurt(self):
+        sample_rate = 22050
+        duration = 0.14
+        n_samples = int(sample_rate * duration)
+        buf = array.array('h')
+        phase = 0.0
+        for i in range(n_samples):
+            t = i / n_samples
+            freq = 140.0 * (1.0 - t * 0.45)
+            phase += 2.0 * math.pi * freq / sample_rate
+            val = int(18000 * (1.0 if math.sin(phase) > 0 else -1.0) * (1.0 - t))
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def _make_alarm(self):
+        sample_rate = 22050
+        duration = 0.35
+        n_samples = int(sample_rate * duration)
+        buf = array.array('h')
+        phase = 0.0
+        chunk = sample_rate // 10
+        for i in range(n_samples):
+            freq = 600.0 if (i // chunk) % 2 == 0 else 460.0
+            phase += 2.0 * math.pi * freq / sample_rate
+            val = int(12000 * (1.0 if math.sin(phase) > 0 else -1.0))
+            buf.append(max(-32768, min(32767, val)))
+        return pygame.mixer.Sound(buffer=buf)
+
+    def play(self, name):
+        if self.enabled and name in self.sounds:
+            try:
+                self.sounds[name].play()
+            except Exception:
+                pass
+
+sound_manager = SoundManager()
+
+# ----------------------------------------------------
+# 3. DATABASE & HIGH SCORE INTEGRATION
+# ----------------------------------------------------
+DB_FILE = "game_users.db"
+TXT_FILE = "highscore.txt"
+
+def init_database():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT DEFAULT '',
+                high_score INTEGER DEFAULT 0
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Database init warning: {e}")
+
+init_database()
+
+def load_high_score():
+    score = 0
+    if os.path.exists(TXT_FILE):
+        try:
+            with open(TXT_FILE, "r") as f:
+                score = int(f.read().strip())
+        except Exception:
+            score = 0
+    return score
+
+def save_high_score(score):
+    try:
+        with open(TXT_FILE, "w") as f:
+            f.write(str(score))
+    except Exception:
+        pass
+
+def get_pilot_best(username):
+    if not username: return 0
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT high_score FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+
+def save_pilot_score(username, score):
+    username = (username.strip() or "Ace Pilot")[:14]
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO users (username, password, high_score)
+            VALUES (?, '', ?)
+            ON CONFLICT(username) DO UPDATE SET high_score = MAX(users.high_score, excluded.high_score)
+        """, (username, score))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving to database: {e}")
+
+def get_top_pilots(limit=5):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, high_score FROM users ORDER BY high_score DESC LIMIT ?", (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        return []
 
 # Load images safely
 def load_image(name, size):
@@ -51,26 +290,27 @@ except pygame.error:
     boss_image = pygame.Surface((150, 100), pygame.SRCALPHA)
     boss_image.fill(PURPLE)
 
-# Display text on the screen
-def display_text(text, size, color, x, y, surface=window):
-    font = pygame.font.SysFont(None, size)
-    rendered_text = font.render(text, True, color)
-    text_rect = rendered_text.get_rect(center=(x, y))
-    surface.blit(rendered_text, text_rect)
-
-# High score management
-def load_high_score():
-    if os.path.exists("highscore.txt"):
-        with open("highscore.txt", "r") as f:
-            try: return int(f.read())
-            except ValueError: return 0
-    return 0
-
-def save_high_score(score):
-    with open("highscore.txt", "w") as f:
-        f.write(str(score))
-
 # --- SPRITE CLASSES ---
+
+class FloatingText(pygame.sprite.Sprite):
+    def __init__(self, text, x, y, color=YELLOW, size=24):
+        super().__init__()
+        font = get_font(size, bold=True)
+        self.image_orig = font.render(str(text), True, color)
+        self.image = self.image_orig.copy()
+        self.rect = self.image.get_rect(center=(int(x), int(y)))
+        self.lifetime = 45
+        self.max_lifetime = 45
+
+    def update(self):
+        self.rect.y -= 1
+        self.lifetime -= 1
+        if self.lifetime <= 0:
+            self.kill()
+        elif self.lifetime < 15:
+            alpha = int(255 * (self.lifetime / 15))
+            self.image = self.image_orig.copy()
+            self.image.set_alpha(max(0, alpha))
 
 class Particle(pygame.sprite.Sprite):
     def __init__(self, x, y, color):
@@ -102,22 +342,18 @@ class PowerUp(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
         self.type = random.choice(['shield', 'rapid_fire', 'life', 'bomb', 'spread_shot', 'piercing_laser'])
-        self.image = pygame.Surface((20, 20), pygame.SRCALPHA)
-        if self.type == 'shield':
-            pygame.draw.circle(self.image, CYAN, (10, 10), 10)
-        elif self.type == 'rapid_fire':
-            pygame.draw.circle(self.image, YELLOW, (10, 10), 10)
-        elif self.type == 'bomb':
-            pygame.draw.circle(self.image, WHITE, (10, 10), 10)
-        elif self.type == 'spread_shot':
-            pygame.draw.circle(self.image, (255, 150, 0), (10, 10), 10) # Orange
-        elif self.type == 'piercing_laser':
-            pygame.draw.circle(self.image, PURPLE, (10, 10), 10)
-        else: # life
-            pygame.draw.circle(self.image, RED, (10, 10), 10)
-        
-        # Inner white circle
-        pygame.draw.circle(self.image, WHITE, (10, 10), 6)
+        self.image = pygame.Surface((22, 22), pygame.SRCALPHA)
+        color_map = {
+            'shield': CYAN,
+            'rapid_fire': YELLOW,
+            'bomb': WHITE,
+            'spread_shot': ORANGE,
+            'piercing_laser': PURPLE,
+            'life': RED
+        }
+        color = color_map.get(self.type, RED)
+        pygame.draw.circle(self.image, color, (11, 11), 10)
+        pygame.draw.circle(self.image, WHITE, (11, 11), 5)
         
         self.rect = self.image.get_rect()
         self.rect.center = (x, y)
@@ -164,17 +400,32 @@ class Player(pygame.sprite.Sprite):
         self.spread_shot_timer = 0
         self.piercing_laser_timer = 0
         self.bombs = 1
-        self.boss_mode_active = False # New flag to track if the player has been empowered
+        self.boss_mode_active = False
 
     def update_state(self, keys):
-        if keys[pygame.K_UP] and self.rect.top > 0:
-            self.rect.y -= self.speed
-        if keys[pygame.K_DOWN] and self.rect.bottom < HEIGHT:
-            self.rect.y += self.speed
-        if keys[pygame.K_LEFT] and self.rect.left > 0:
-            self.rect.x -= self.speed
-        if keys[pygame.K_RIGHT] and self.rect.right < WIDTH // 2:
-            self.rect.x += self.speed
+        dx, dy = 0, 0
+        if (keys[pygame.K_UP] or keys[pygame.K_w]) and self.rect.top > 0:
+            dy -= 1
+        if (keys[pygame.K_DOWN] or keys[pygame.K_s]) and self.rect.bottom < HEIGHT:
+            dy += 1
+        if (keys[pygame.K_LEFT] or keys[pygame.K_a]) and self.rect.left > 0:
+            dx -= 1
+        if (keys[pygame.K_RIGHT] or keys[pygame.K_d]) and self.rect.right < WIDTH // 2:
+            dx += 1
+            
+        # Normalized diagonal movement
+        if dx != 0 and dy != 0:
+            self.rect.x += int(dx * self.speed * 0.7071)
+            self.rect.y += int(dy * self.speed * 0.7071)
+        else:
+            self.rect.x += dx * self.speed
+            self.rect.y += dy * self.speed
+
+        # Boundary clamping
+        if self.rect.top < 0: self.rect.top = 0
+        if self.rect.bottom > HEIGHT: self.rect.bottom = HEIGHT
+        if self.rect.left < 0: self.rect.left = 0
+        if self.rect.right > WIDTH // 2: self.rect.right = WIDTH // 2
         
         self.last_shot += 1
 
@@ -188,7 +439,7 @@ class Player(pygame.sprite.Sprite):
         if self.invulnerable_timer > 0:
             self.invulnerable_timer -= 1
             if self.invulnerable_timer % 10 < 5:
-                self.image = pygame.Surface((50,30), pygame.SRCALPHA)
+                self.image = pygame.Surface((50, 30), pygame.SRCALPHA)
             else:
                 self.image = self.image_original
         else:
@@ -200,11 +451,10 @@ class Player(pygame.sprite.Sprite):
             is_piercing = self.piercing_laser_timer > 0
             bullet_speed = 15 if is_piercing else 10
             
-            # Check if player is empowered for boss fight or has spread shot
             if self.boss_mode_active or self.spread_shot_timer > 0:
                 for vy in [-2, 0, 2]:
                     bullet = Bullet(self.rect.right, self.rect.centery, bullet_speed, piercing=is_piercing)
-                    bullet.speed_y = vy  # Angled shots
+                    bullet.speed_y = vy
                     all_sprites.add(bullet)
                     bullets.add(bullet)
             else:
@@ -212,16 +462,18 @@ class Player(pygame.sprite.Sprite):
                 all_sprites.add(bullet)
                 bullets.add(bullet)
                 
+            sound_manager.play('laser')
             self.last_shot = 0
             
     def take_damage(self):
         if self.invulnerable_timer == 0:
             if self.has_shield:
                 self.has_shield = False
-                self.invulnerable_timer = 60 # 1 sec invuln
+                self.invulnerable_timer = 60
             else:
                 self.lives -= 1
-                self.invulnerable_timer = 90 # 1.5 secs invuln
+                self.invulnerable_timer = 90
+            sound_manager.play('hurt')
             return True
         return False
 
@@ -361,8 +613,9 @@ class Bullet(pygame.sprite.Sprite):
         super().__init__()
         self.piercing = piercing
         if self.piercing:
-            self.image = pygame.Surface((15, 5))
+            self.image = pygame.Surface((16, 6))
             self.image.fill(PURPLE)
+            pygame.draw.rect(self.image, WHITE, (2, 2, 12, 2))
         else:
             self.image = bullet_image
         self.rect = self.image.get_rect()
@@ -378,21 +631,124 @@ class Bullet(pygame.sprite.Sprite):
 
 # --- GAME SCREENS ---
 
+def pause_menu():
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    window.blit(overlay, (0, 0))
+    
+    display_text("GAME PAUSED", 60, YELLOW, WIDTH // 2, HEIGHT // 2 - 60, bold=True)
+    display_text("Press P or ESC to Resume", 30, WHITE, WIDTH // 2, HEIGHT // 2 + 10)
+    display_text("Press Q to Quit to Menu", 25, RED, WIDTH // 2, HEIGHT // 2 + 60)
+    pygame.display.flip()
+    
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_p, pygame.K_ESCAPE):
+                    return False  # Continue playing
+                if event.key == pygame.K_q:
+                    return True   # Quit to menu
+        clock.tick(30)
+
+def leaderboard_screen():
+    pilots = get_top_pilots(5)
+    running = True
+    
+    while running:
+        window.fill(BLACK)
+        display_text("TOP PILOTS HALL OF FAME", 46, GOLD, WIDTH // 2, 80, bold=True)
+        display_text("Rankings stored in database", 20, GRAY, WIDTH // 2, 125)
+        
+        y_start = 180
+        if not pilots:
+            display_text("No pilot records found yet. Go fly and make history!", 28, LIGHT_GRAY, WIDTH // 2, 260)
+        else:
+            rank_colors = [GOLD, SILVER, BRONZE, WHITE, WHITE]
+            for i, (name, high_score) in enumerate(pilots):
+                color = rank_colors[i] if i < len(rank_colors) else WHITE
+                rank_str = f"#{i+1}"
+                
+                # Draw card row
+                card_rect = pygame.Rect(WIDTH // 2 - 250, y_start + i * 55, 500, 44)
+                pygame.draw.rect(window, DARK_GRAY, card_rect, border_radius=8)
+                pygame.draw.rect(window, color, card_rect, width=2, border_radius=8)
+                
+                display_text(rank_str, 28, color, card_rect.left + 40, card_rect.centery, bold=True)
+                display_text(name, 26, WHITE, card_rect.left + 120, card_rect.centery, align="left")
+                display_text(f"{high_score:,} pts", 26, YELLOW, card_rect.right - 30, card_rect.centery, align="right")
+
+        back_btn = pygame.Rect(WIDTH // 2 - 90, HEIGHT - 85, 180, 45)
+        pygame.draw.rect(window, GRAY, back_btn, border_radius=8)
+        display_text("Back [ESC]", 24, WHITE, back_btn.centerx, back_btn.centery)
+        
+        pygame.display.flip()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_SPACE, pygame.K_RETURN):
+                    running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if back_btn.collidepoint(event.pos):
+                    running = False
+        clock.tick(30)
+
+def name_input_screen(current_name):
+    name = current_name
+    input_box = pygame.Rect(WIDTH // 2 - 160, HEIGHT // 2 - 25, 320, 50)
+    running = True
+    
+    while running:
+        window.fill(BLACK)
+        display_text("ENTER PILOT CALLSIGN", 44, CYAN, WIDTH // 2, HEIGHT // 2 - 100, bold=True)
+        display_text("Type your name and press ENTER", 22, GRAY, WIDTH // 2, HEIGHT // 2 - 50)
+        
+        pygame.draw.rect(window, DARK_GRAY, input_box, border_radius=8)
+        pygame.draw.rect(window, CYAN, input_box, width=3, border_radius=8)
+        display_text(name if name else "...", 32, WHITE if name else GRAY, input_box.centerx, input_box.centery)
+        
+        confirm_btn = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 + 60, 160, 45)
+        pygame.draw.rect(window, GRAY, confirm_btn, border_radius=8)
+        display_text("Confirm", 24, WHITE, confirm_btn.centerx, confirm_btn.centery)
+        
+        pygame.display.flip()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    return name.strip() or "Ace Pilot"
+                elif event.key == pygame.K_BACKSPACE:
+                    name = name[:-1]
+                elif len(name) < 12 and event.unicode.isprintable():
+                    name += event.unicode
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if confirm_btn.collidepoint(event.pos):
+                    return name.strip() or "Ace Pilot"
+        clock.tick(30)
+
 def difficulty_selection_screen():
     window.fill(BLACK)
-    display_text("Select Difficulty", 55, WHITE, WIDTH // 2, HEIGHT // 2 - 80)
+    display_text("Select Difficulty", 55, WHITE, WIDTH // 2, HEIGHT // 2 - 110, bold=True)
 
-    easy_button = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 - 20, 200, 50)
-    medium_button = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 50)
-    hard_button = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 120, 200, 50)
+    easy_button = pygame.Rect(WIDTH // 2 - 120, HEIGHT // 2 - 40, 240, 50)
+    medium_button = pygame.Rect(WIDTH // 2 - 120, HEIGHT // 2 + 30, 240, 50)
+    hard_button = pygame.Rect(WIDTH // 2 - 120, HEIGHT // 2 + 100, 240, 50)
 
-    pygame.draw.rect(window, GRAY, easy_button, border_radius=10)
-    pygame.draw.rect(window, GRAY, medium_button, border_radius=10)
-    pygame.draw.rect(window, GRAY, hard_button, border_radius=10)
+    pygame.draw.rect(window, (40, 140, 40), easy_button, border_radius=10)
+    pygame.draw.rect(window, (160, 140, 30), medium_button, border_radius=10)
+    pygame.draw.rect(window, (160, 40, 40), hard_button, border_radius=10)
     
-    display_text("Easy", 30, WHITE, easy_button.centerx, easy_button.centery)
-    display_text("Medium", 30, WHITE, medium_button.centerx, medium_button.centery)
-    display_text("Hard", 30, WHITE, hard_button.centerx, hard_button.centery)
+    display_text("Easy (Casual)", 28, WHITE, easy_button.centerx, easy_button.centery)
+    display_text("Medium (Standard)", 28, WHITE, medium_button.centerx, medium_button.centery)
+    display_text("Hard (Intense)", 28, WHITE, hard_button.centerx, hard_button.centery)
 
     pygame.display.flip()
 
@@ -405,20 +761,28 @@ def difficulty_selection_screen():
                 if easy_button.collidepoint(event.pos): return "Easy"
                 elif medium_button.collidepoint(event.pos): return "Medium"
                 elif hard_button.collidepoint(event.pos): return "Hard"
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_1: return "Easy"
+                elif event.key == pygame.K_2: return "Medium"
+                elif event.key == pygame.K_3: return "Hard"
+                elif event.key == pygame.K_ESCAPE: return "Medium"
 
-def game_over_screen(score, high_score, won=False):
+def game_over_screen(score, high_score, won=False, pilot_name="Ace Pilot"):
     window.fill(BLACK)
     if won:
-        display_text("YOU WIN!", 75, GREEN, WIDTH // 2, HEIGHT // 2 - 80)
+        display_text("MISSION ACCOMPLISHED!", 62, GREEN, WIDTH // 2, HEIGHT // 2 - 110, bold=True)
+        display_text("You eliminated the Boss and saved the sector!", 26, WHITE, WIDTH // 2, HEIGHT // 2 - 60)
     else:
-        display_text("Game Over", 65, RED, WIDTH // 2, HEIGHT // 2 - 80)
+        display_text("SYSTEM FAILURE", 65, RED, WIDTH // 2, HEIGHT // 2 - 110, bold=True)
+        display_text("Your spaceship was destroyed in combat.", 24, GRAY, WIDTH // 2, HEIGHT // 2 - 60)
         
-    display_text(f"Score: {score}", 40, WHITE, WIDTH // 2, HEIGHT // 2 - 10)
-    display_text(f"High Score: {high_score}", 40, YELLOW, WIDTH // 2, HEIGHT // 2 + 30)
+    display_text(f"Pilot: {pilot_name}", 32, CYAN, WIDTH // 2, HEIGHT // 2 - 15)
+    display_text(f"Final Score: {score:,}", 38, WHITE, WIDTH // 2, HEIGHT // 2 + 25)
+    display_text(f"High Score: {high_score:,}", 32, YELLOW, WIDTH // 2, HEIGHT // 2 + 65)
 
-    restart_button = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 90, 200, 50)
+    restart_button = pygame.Rect(WIDTH // 2 - 110, HEIGHT // 2 + 120, 220, 50)
     pygame.draw.rect(window, GRAY, restart_button, border_radius=10)
-    display_text("Restart", 30, WHITE, restart_button.centerx, restart_button.centery)
+    display_text("Play Again", 28, WHITE, restart_button.centerx, restart_button.centery)
     
     pygame.display.flip()
 
@@ -430,10 +794,13 @@ def game_over_screen(score, high_score, won=False):
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if restart_button.collidepoint(event.pos):
                     return
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_r):
+                    return
 
 # --- MAIN GAME LOOP ---
 
-def game_loop(difficulty):
+def game_loop(difficulty, pilot_name="Ace Pilot"):
     if difficulty == "Easy":
         ast_spd, comp_spd, comp_cd, max_asteroids = 4, 3, 60, 4
     elif difficulty == "Medium":
@@ -449,6 +816,7 @@ def game_loop(difficulty):
     enemy_bullets = pygame.sprite.Group()
     powerups = pygame.sprite.Group()
     particles = pygame.sprite.Group()
+    floating_texts = pygame.sprite.Group()
 
     for _ in range(50):
         star = Star()
@@ -463,6 +831,7 @@ def game_loop(difficulty):
     game_surface = pygame.Surface((WIDTH, HEIGHT))
     shake_timer = 0
     bomb_flash_timer = 0
+    boss_warning_timer = 0
     
     combo = 0
     combo_timer = 0
@@ -474,17 +843,16 @@ def game_loop(difficulty):
         asteroids.add(asteroid)
 
     score = 0
-    high_score = load_high_score()
+    saved_high = max(load_high_score(), get_pilot_best(pilot_name))
     running = True
     boss_active = False
     boss = None
     won = False
     
-    # 1000 Score to trigger Boss Battle!
     BOSS_THRESHOLD = 1000
     
     def spawn_powerup(x, y):
-        if random.random() < 0.15:
+        if random.random() < 0.18:
             pu = PowerUp(x, y)
             all_sprites.add(pu)
             powerups.add(pu)
@@ -497,29 +865,67 @@ def game_loop(difficulty):
                 pygame.quit()
                 exit()
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_b and player.bombs > 0 and not boss_active:
+                # Pause Support
+                if event.key in (pygame.K_p, pygame.K_ESCAPE):
+                    should_quit = pause_menu()
+                    if should_quit:
+                        return
+                        
+                # Bomb Support (Normal waves + Boss battle)
+                if event.key == pygame.K_b and player.bombs > 0:
                     player.bombs -= 1
-                    bomb_flash_timer = 10
+                    bomb_flash_timer = 12
                     shake_timer = 30
-                    for e in enemies:
-                        create_explosion(e.rect.centerx, e.rect.centery, RED, 20, all_sprites, particles)
-                        score += 50 * score_multiplier
-                        combo += 1
-                        e.kill()
-                    for ast in asteroids:
-                        create_explosion(ast.rect.centerx, ast.rect.centery, GRAY, 10, all_sprites, particles)
-                        score += 5 * score_multiplier
-                        combo += 1
-                        ast.kill()
-                    combo_timer = 180
+                    sound_manager.play('bomb')
+                    
+                    if boss_active and boss and boss.state == 'fighting':
+                        boss.health -= 15
+                        create_explosion(boss.rect.centerx, boss.rect.centery, PURPLE, 40, all_sprites, particles)
+                        txt = FloatingText("-15 BOMB DAMAGE!", boss.rect.centerx, boss.rect.centery - 30, RED, 26)
+                        all_sprites.add(txt)
+                        floating_texts.add(txt)
+                        # Clear all enemy bullets on screen
+                        for b in list(enemy_bullets):
+                            create_explosion(b.rect.centerx, b.rect.centery, YELLOW, 4, all_sprites, particles)
+                            b.kill()
+                        if boss.health <= 0:
+                            score += 1000
+                            create_explosion(boss.rect.centerx, boss.rect.centery, PURPLE, 100, all_sprites, particles)
+                            boss.kill()
+                            shake_timer = 60
+                            won = True
+                            running = False
+                    else:
+                        for e in list(enemies):
+                            create_explosion(e.rect.centerx, e.rect.centery, RED, 20, all_sprites, particles)
+                            pts = 50 * score_multiplier
+                            score += pts
+                            combo += 1
+                            txt = FloatingText(f"+{pts}", e.rect.centerx, e.rect.centery, YELLOW)
+                            all_sprites.add(txt)
+                            floating_texts.add(txt)
+                            e.kill()
+                        for ast in list(asteroids):
+                            create_explosion(ast.rect.centerx, ast.rect.centery, GRAY, 10, all_sprites, particles)
+                            pts = 15 * score_multiplier
+                            score += pts
+                            combo += 1
+                            txt = FloatingText(f"+{pts}", ast.rect.centerx, ast.rect.centery, WHITE)
+                            all_sprites.add(txt)
+                            floating_texts.add(txt)
+                            ast.kill()
+                        combo_timer = 180
 
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
             player.shoot(all_sprites, player_bullets)
             
         # Engine particles
-        if keys[pygame.K_UP] or keys[pygame.K_DOWN] or keys[pygame.K_LEFT] or keys[pygame.K_RIGHT]:
-            p = Particle(player.rect.left + 5, player.rect.centery + random.randint(-5, 5), (255, random.randint(100, 200), 0))
+        if (keys[pygame.K_UP] or keys[pygame.K_w] or 
+            keys[pygame.K_DOWN] or keys[pygame.K_s] or 
+            keys[pygame.K_LEFT] or keys[pygame.K_a] or 
+            keys[pygame.K_RIGHT] or keys[pygame.K_d]):
+            p = Particle(player.rect.left + 5, player.rect.centery + random.randint(-5, 5), (255, random.randint(120, 220), 0))
             p.vx = -random.uniform(3, 6)
             p.vy = random.uniform(-1, 1)
             all_sprites.add(p)
@@ -530,23 +936,21 @@ def game_loop(difficulty):
             boss_active = True
             boss = Boss()
             all_sprites.add(boss)
+            boss_warning_timer = 160
+            sound_manager.play('alarm')
             
-            # Spawn a powerup as soon as the boss enters!
             spawn_powerup((WIDTH // 2) + 100, HEIGHT // 2)
-            # Guarantee a drop for balance by forcing it
             guaranteed_pu = PowerUp((WIDTH // 2) + 100, HEIGHT // 2)
             all_sprites.add(guaranteed_pu)
             powerups.add(guaranteed_pu)
             
-            # POWER UP THE PLAYER!
             player.boss_mode_active = True
-            player.lives = max(player.lives, 3) # Give them at least some health back
+            player.lives = max(player.lives, 3)
             
-            # Kill regular enemies & asteroids to focus on Boss
-            for e in enemies:
+            for e in list(enemies):
                 create_explosion(e.rect.centerx, e.rect.centery, RED, 15, all_sprites, particles)
                 e.kill()
-            for ast in asteroids:
+            for ast in list(asteroids):
                 create_explosion(ast.rect.centerx, ast.rect.centery, GRAY, 10, all_sprites, particles)
                 ast.kill()
 
@@ -564,6 +968,7 @@ def game_loop(difficulty):
         enemy_bullets.update()
         powerups.update()
         particles.update()
+        floating_texts.update()
         player.update_state(keys)
 
         if boss_active and boss:
@@ -575,35 +980,38 @@ def game_loop(difficulty):
 
         # Mechanics When Boss Is NOT Active
         if not boss_active:
-            # Asteroid respawning points
+            # Evasion off-screen awards 0 pts
             for asteroid in list(asteroids):
                 if asteroid.rect.right < 0:
                     asteroid.kill()
-                    score += 10
             
-            # Enemies moving off screen
             for e in list(enemies):
                 if e.rect.right < 0:
                     e.kill()
             
             # Player bullets hit enemies
-            # Check collisions manually to account for piercing
             for e in list(enemies):
                 hit_bullets = pygame.sprite.spritecollide(e, player_bullets, False)
                 if hit_bullets:
                     for b in hit_bullets:
                         if not b.piercing:
                             b.kill()
-                    score += 50 * score_multiplier
+                    pts = 50 * score_multiplier
+                    score += pts
                     combo += 1
                     combo_timer = 180
                     score_multiplier = min(5, 1 + (combo // 5))
                     create_explosion(e.rect.centerx, e.rect.centery, RED, 20, all_sprites, particles)
+                    sound_manager.play('explosion')
+                    txt = FloatingText(f"+{pts}", e.rect.centerx, e.rect.centery, YELLOW)
+                    all_sprites.add(txt)
+                    floating_texts.add(txt)
                     spawn_powerup(e.rect.centerx, e.rect.centery)
                     e.kill()
                 
             # Maintain enemies
-            if len(enemies) < (2 if score > 150 else 1):
+            target_enemy_count = 2 if score > 150 else 1
+            if len(enemies) < target_enemy_count:
                 choice = random.choice([0, 1, 2])
                 if choice == 0: new_e = Enemy(comp_spd, comp_cd)
                 elif choice == 1: new_e = Kamikaze(comp_spd)
@@ -618,11 +1026,16 @@ def game_loop(difficulty):
                     for b in hit_bullets:
                         if not b.piercing:
                             b.kill()
-                    score += 5 * score_multiplier
+                    pts = 15 * score_multiplier
+                    score += pts
                     combo += 1
                     combo_timer = 180
                     score_multiplier = min(5, 1 + (combo // 5))
                     create_explosion(ast.rect.centerx, ast.rect.centery, GRAY, 10, all_sprites, particles)
+                    sound_manager.play('explosion')
+                    txt = FloatingText(f"+{pts}", ast.rect.centerx, ast.rect.centery, WHITE)
+                    all_sprites.add(txt)
+                    floating_texts.add(txt)
                     spawn_powerup(ast.rect.centerx, ast.rect.centery)
                     ast.kill()
             
@@ -634,12 +1047,23 @@ def game_loop(difficulty):
 
         # Mechanics When Boss IS Active
         if boss_active and boss and boss.state == 'fighting':
-            # Player bullets hit boss
-            if pygame.sprite.spritecollide(boss, player_bullets, True):
-                boss.health -= 1
+            hit_bullets = pygame.sprite.spritecollide(boss, player_bullets, False)
+            if hit_bullets:
+                damage_dealt = 0
+                for b in hit_bullets:
+                    damage_dealt += 1
+                    if not b.piercing:
+                        b.kill()
+                boss.health -= damage_dealt
+                create_explosion(boss.rect.left + 15, player.rect.centery, (255, 180, 0), 4, all_sprites, particles)
+                sound_manager.play('hurt')
+                
                 if boss.health <= 0:
                     score += 1000
                     create_explosion(boss.rect.centerx, boss.rect.centery, PURPLE, 100, all_sprites, particles)
+                    txt = FloatingText("+1000 BOSS DEFEATED!", boss.rect.centerx, boss.rect.centery - 30, GOLD, 30)
+                    all_sprites.add(txt)
+                    floating_texts.add(txt)
                     boss.kill()
                     shake_timer = 60
                     won = True
@@ -648,18 +1072,30 @@ def game_loop(difficulty):
         # Collect Powerups
         collected = pygame.sprite.spritecollide(player, powerups, True)
         for pu in collected:
+            sound_manager.play('powerup')
+            label = ""
             if pu.type == 'shield':
                 player.has_shield = True
+                label = "SHIELD ACTIVE!"
             elif pu.type == 'rapid_fire':
-                player.rapid_fire_timer = 300 # 5 seconds
+                player.rapid_fire_timer = 300
+                label = "RAPID FIRE!"
             elif pu.type == 'life':
                 player.lives = min(player.lives + 1, 5)
+                label = "+1 EXTRA LIFE!"
             elif pu.type == 'bomb':
                 player.bombs = min(player.bombs + 1, 3)
+                label = "+1 BOMB!"
             elif pu.type == 'spread_shot':
                 player.spread_shot_timer = 300
+                label = "SPREAD SHOT!"
             elif pu.type == 'piercing_laser':
                 player.piercing_laser_timer = 300
+                label = "PIERCING LASER!"
+            if label:
+                txt = FloatingText(label, player.rect.centerx, player.rect.top - 15, CYAN, 22)
+                all_sprites.add(txt)
+                floating_texts.add(txt)
 
         # Take Damage
         hit_by_enemy_bullets = pygame.sprite.spritecollide(player, enemy_bullets, True)
@@ -675,19 +1111,10 @@ def game_loop(difficulty):
             if player.lives <= 0:
                 running = False
 
-        # Draw to game_surface instead of window
+        # Draw to game_surface
         all_sprites.draw(game_surface)
         
-        # Draw Boss Health Bar
-        if boss_active and boss and boss.state == 'fighting':
-            bar_width = 400
-            bar_height = 20
-            health_ratio = max(0, boss.health / boss.max_health)
-            pygame.draw.rect(game_surface, GRAY, (WIDTH//2 - bar_width//2, 20, bar_width, bar_height))
-            pygame.draw.rect(game_surface, RED, (WIDTH//2 - bar_width//2, 20, int(bar_width * health_ratio), bar_height))
-            display_text("BOSS", 25, WHITE, WIDTH//2, 10, surface=game_surface)
-
-        # Draw Shield Effect
+        # Draw Shield Visual
         if player.has_shield:
             pygame.draw.circle(game_surface, CYAN, player.rect.center, 30, 2)
 
@@ -703,68 +1130,133 @@ def game_loop(difficulty):
         # Apply Bomb Flash effect
         if bomb_flash_timer > 0:
             flash_surface = pygame.Surface((WIDTH, HEIGHT))
-            # Alpha goes from 255 (opaque) to 0 over 10 frames
-            alpha = int(255 * (bomb_flash_timer / 10))
+            alpha = int(255 * (bomb_flash_timer / 12))
             flash_surface.set_alpha(alpha)
             flash_surface.fill(WHITE)
             window.blit(flash_surface, (0, 0))
             bomb_flash_timer -= 1
 
-        # UI
-        display_text(f"Score: {score}", 30, WHITE, 80, 20)
-        display_text(f"High Score: {high_score}", 30, YELLOW, WIDTH - 120, 20)
+        # Boss Incoming Warning Banner
+        if boss_warning_timer > 0:
+            boss_warning_timer -= 1
+            if (boss_warning_timer // 15) % 2 == 0:
+                banner_rect = pygame.Rect(0, HEIGHT // 2 - 40, WIDTH, 80)
+                banner_surf = pygame.Surface((WIDTH, 80), pygame.SRCALPHA)
+                banner_surf.fill((200, 0, 0, 180))
+                window.blit(banner_surf, (0, HEIGHT // 2 - 40))
+                pygame.draw.rect(window, YELLOW, banner_rect, 3)
+                display_text("WARNING: BOSS APPROACHING!", 42, WHITE, WIDTH // 2, HEIGHT // 2, bold=True)
+
+        # Draw Boss Health Bar HUD
+        if boss_active and boss and boss.state == 'fighting':
+            bar_width = 420
+            bar_height = 20
+            health_ratio = max(0, boss.health / boss.max_health)
+            bar_x = WIDTH // 2 - bar_width // 2
+            pygame.draw.rect(window, DARK_GRAY, (bar_x, 25, bar_width, bar_height), border_radius=5)
+            pygame.draw.rect(window, RED, (bar_x, 25, int(bar_width * health_ratio), bar_height), border_radius=5)
+            pygame.draw.rect(window, WHITE, (bar_x, 25, bar_width, bar_height), 2, border_radius=5)
+            display_text(f"DREADNOUGHT M-1  ({max(0, boss.health)} / {boss.max_health} HP)", 20, WHITE, WIDTH // 2, 14, bold=True)
+
+        # Dynamic Real-time HUD
+        live_high = max(score, saved_high)
+        display_text(f"Score: {score:,}", 28, WHITE, 85, 22, align="left")
+        display_text(f"High: {live_high:,}", 26, YELLOW, WIDTH - 20, 22, align="right")
         
         # Display Lives
-        display_text("Lives: ", 30, WHITE, WIDTH // 2 - 50, HEIGHT - 20)
+        display_text("Lives:", 24, WHITE, WIDTH // 2 - 40, HEIGHT - 20)
         for i in range(player.lives):
-            window.blit(mini_player_img, (WIDTH // 2 - 5 + i * 30, HEIGHT - 30))
+            window.blit(mini_player_img, (WIDTH // 2 + 5 + i * 28, HEIGHT - 28))
             
         # Display Bombs
-        display_text(f"Bombs: {player.bombs}", 30, WHITE, WIDTH // 2 - 200, HEIGHT - 20)
+        bomb_color = WHITE if player.bombs > 0 else GRAY
+        display_text(f"Bombs [B]: {player.bombs}", 24, bomb_color, 90, HEIGHT - 20, align="left")
             
         # UI for Active Power-ups
-        status_y = 50
+        status_y = 55
         if player.rapid_fire_timer > 0:
-            display_text(f"Rapid Fire: {player.rapid_fire_timer // 60}s", 25, YELLOW, 90, status_y)
-            status_y += 25
+            display_text(f"Rapid Fire: {player.rapid_fire_timer // 60}s", 22, YELLOW, 85, status_y, align="left")
+            status_y += 24
         if player.spread_shot_timer > 0:
-            display_text(f"Spread Shot: {player.spread_shot_timer // 60}s", 25, (255, 150, 0), 90, status_y)
-            status_y += 25
+            display_text(f"Spread Shot: {player.spread_shot_timer // 60}s", 22, ORANGE, 85, status_y, align="left")
+            status_y += 24
         if player.piercing_laser_timer > 0:
-            display_text(f"Piercing Laser: {player.piercing_laser_timer // 60}s", 25, PURPLE, 90, status_y)
+            display_text(f"Piercing Laser: {player.piercing_laser_timer // 60}s", 22, PURPLE, 85, status_y, align="left")
             
         # Combo UI
         if combo > 1:
-            display_text(f"Combo: {combo}", 40, (255, 100, 100), WIDTH - 120, 60)
+            display_text(f"Combo: {combo}", 36, (255, 120, 120), WIDTH - 20, 58, align="right", bold=True)
             if score_multiplier > 1:
-                display_text(f"Multiplier: {score_multiplier}x", 30, YELLOW, WIDTH - 120, 90)
+                display_text(f"{score_multiplier}x Multiplier", 26, GOLD, WIDTH - 20, 90, align="right")
 
         pygame.display.flip()
         clock.tick(FPS)
 
-    save_high_score(max(score, high_score))
-    game_over_screen(score, max(score, high_score), won)
+    final_high = max(score, saved_high)
+    save_high_score(final_high)
+    save_pilot_score(pilot_name, score)
+    game_over_screen(score, final_high, won, pilot_name=pilot_name)
 
 def main():
+    pilot_name = "Ace Pilot"
+    top_records = get_top_pilots(1)
+    if top_records:
+        pilot_name = top_records[0][0]
+
+    title_stars = [Star() for _ in range(40)]
+    
     while True:
         window.fill(BLACK)
-        display_text("SPACE WARS", 70, (100, 200, 255), WIDTH // 2, HEIGHT // 2 - 60)
-        display_text("Press SPACE to Start", 35, WHITE, WIDTH // 2, HEIGHT // 2 + 20)
-        display_text("Arrow Keys: Move | SPACE: Shoot", 25, GRAY, WIDTH // 2, HEIGHT - 50)
+        
+        for s in title_stars:
+            s.update()
+            window.blit(s.image, s.rect)
+
+        display_text("SPACE WARS", 76, (110, 210, 255), WIDTH // 2, HEIGHT // 2 - 120, bold=True)
+        display_text("Arcade Sector Defense", 24, GRAY, WIDTH // 2, HEIGHT // 2 - 65)
+        
+        start_btn = pygame.Rect(WIDTH // 2 - 130, HEIGHT // 2 - 20, 260, 48)
+        pygame.draw.rect(window, (30, 90, 180), start_btn, border_radius=8)
+        display_text("START MISSION [SPACE]", 24, WHITE, start_btn.centerx, start_btn.centery, bold=True)
+        
+        name_btn = pygame.Rect(WIDTH // 2 - 130, HEIGHT // 2 + 40, 260, 38)
+        pygame.draw.rect(window, DARK_GRAY, name_btn, border_radius=8)
+        pygame.draw.rect(window, CYAN, name_btn, 1, border_radius=8)
+        display_text(f"Pilot: {pilot_name} [N]", 20, CYAN, name_btn.centerx, name_btn.centery)
+        
+        hall_btn = pygame.Rect(WIDTH // 2 - 130, HEIGHT // 2 + 90, 260, 38)
+        pygame.draw.rect(window, DARK_GRAY, hall_btn, border_radius=8)
+        pygame.draw.rect(window, GOLD, hall_btn, 1, border_radius=8)
+        display_text("Leaderboard / Hall [L]", 20, GOLD, hall_btn.centerx, hall_btn.centery)
+        
+        display_text("Controls: WASD / Arrows: Move  |  SPACE: Shoot  |  B: Bomb  |  P: Pause", 20, LIGHT_GRAY, WIDTH // 2, HEIGHT - 35)
         pygame.display.flip()
 
-        waiting = True
-        while waiting:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        waiting = False
+        start_mission = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_SPACE, pygame.K_RETURN):
+                    start_mission = True
+                elif event.key == pygame.K_n:
+                    pilot_name = name_input_screen(pilot_name)
+                elif event.key == pygame.K_l:
+                    leaderboard_screen()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if start_btn.collidepoint(event.pos):
+                    start_mission = True
+                elif name_btn.collidepoint(event.pos):
+                    pilot_name = name_input_screen(pilot_name)
+                elif hall_btn.collidepoint(event.pos):
+                    leaderboard_screen()
+                    
+        clock.tick(30)
 
-        difficulty = difficulty_selection_screen()
-        game_loop(difficulty)
+        if start_mission:
+            difficulty = difficulty_selection_screen()
+            game_loop(difficulty, pilot_name=pilot_name)
 
 if __name__ == "__main__":
     main()
