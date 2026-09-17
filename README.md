@@ -1,3 +1,4 @@
+
 # 🚀 Space Wars
 
 A 2D space shooter game developed using **Python and Pygame**. Control your spaceship, destroy enemy ships and asteroids, collect power-ups, and defeat the final boss to win the game.
@@ -47,7 +48,7 @@ Space-Wars/
 └── README.md
 ```
 
-**Note:** The `game_users.db` file is included in the project directory, but the current game code does not use it. The high score is stored in `highscore.txt`.
+**Note:** The `game_users.db` SQLite database stores pilot profiles and high scores for the in-game Top 5 Pilots Hall of Fame. The overall top record is also mirrored in `highscore.txt`.
 
 ## ⚙️ Installation and Setup
 
@@ -87,14 +88,17 @@ The game window will open. Press the spacebar to start playing.
 
 ## 🕹️ Controls
 
-| Key           | Action                     |
-| ------------- | -------------------------- |
-| ↑ Up Arrow    | Move spaceship up          |
-| ↓ Down Arrow  | Move spaceship down        |
-| ← Left Arrow  | Move spaceship left        |
-| → Right Arrow | Move spaceship right       |
-| Spacebar      | Shoot bullets / Start game |
-| B             | Use bomb                   |
+| Key                      | Action                                     |
+| ------------------------ | ------------------------------------------ |
+| ↑ / W                    | Move spaceship up                          |
+| ↓ / S                    | Move spaceship down                        |
+| ← / A                    | Move spaceship left                        |
+| → / D                    | Move spaceship right                       |
+| Spacebar / Enter         | Shoot bullets / Confirm selection          |
+| B                        | Use bomb (damages boss & clears screen)    |
+| P / Escape               | Pause / Resume game                        |
+| N (in menu)              | Change pilot callsign                      |
+| L (in menu)              | View Top 5 Pilots Leaderboard              |
 
 ## ⚡ Power-Ups
 
@@ -107,7 +111,7 @@ Collect power-ups dropped by destroyed enemies and asteroids to gain special abi
 | Extra Life     | Adds one life, up to a maximum of 5                |
 | Bomb           | Adds one bomb, up to a maximum of 3                |
 | Spread Shot    | Fires multiple bullets in different directions     |
-| Piercing Laser | Fires faster bullets that can pass through enemies |
+| Piercing Laser | Fires faster bullets that pass through enemies     |
 
 Most temporary power-ups last for 5 seconds.
 
@@ -116,17 +120,17 @@ Most temporary power-ups last for 5 seconds.
 ### Enemy types
 
 * **Regular Enemy:** Follows the player's vertical position and fires bullets.
-* **Kamikaze Enemy:** Moves directly toward the player.
+* **Kamikaze Enemy:** Moves directly toward the player with homing vectors.
 * **Sine Enemy:** Moves horizontally in a wave pattern while shooting.
 
-### Boss Battle
+### Boss Battle: Dreadnought M-1
 
-When the score reaches **1000 points**, the boss battle begins.
+When the score reaches **1000 points**, the boss battle begins with a warning klaxon.
 
 The boss has 100 health points and uses two attack patterns:
 
 1. Triple spread-shot attack.
-2. Rapid-fire bullet attack.
+2. Rapid-fire burst attack.
 
 Defeat the boss to complete the game and display the victory screen.
 
@@ -135,19 +139,18 @@ Defeat the boss to complete the game and display the victory screen.
 | Action                                | Points |
 | ------------------------------------- | -----: |
 | Destroy an enemy                      |     50 |
-| Destroy an asteroid                   |      5 |
-| Allow an asteroid to leave the screen |     10 |
+| Destroy an asteroid                   |     15 |
 | Defeat the boss                       |   1000 |
 
 Combo multipliers increase the points earned from destroying enemies and asteroids, up to a maximum of 5×.
 
-## 💾 High-Score System
+## 💾 High-Score & Leaderboard System
 
-The game uses a local text file named `highscore.txt` to store the highest score.
+The game automatically tracks high scores across game sessions:
 
-* The high score is loaded when a game session begins.
-* The score is saved when the game ends.
-* The highest score is displayed during gameplay and on the game-over screen.
+* **Real-Time HUD**: Displays the current session high score dynamically.
+* **Database Leaderboard**: `game_users.db` saves high scores per pilot callsign with a dedicated Top 5 Hall of Fame screen.
+* **Text Fallback**: Top overall score is mirrored to `highscore.txt`.
 
 
 
